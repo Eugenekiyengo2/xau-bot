@@ -22,6 +22,10 @@ on:
         description: "Include real CFTC COT history"
         default: true
         type: boolean
+      trend_filter:
+        description: "Refuse trades that fight the primary trend (untick to compare)"
+        default: true
+        type: boolean
 
 jobs:
   backtest:
@@ -40,6 +44,7 @@ jobs:
             --bars "${{ inputs.bars }}" \
             --refresh \
             ${{ inputs.with_cot && '--with-cot' || '' }} \
+            ${{ inputs.trend_filter && ' ' || '--no-trend-filter' }} \
             --csv trades.csv
         env:
           SYMBOL: XAU/USD
