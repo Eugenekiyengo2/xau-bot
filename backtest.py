@@ -40,7 +40,7 @@ ALL_TFS = ("1W", "1D", "4H", "30m", "15m", "3m")
 BAR_LEN = {"1W": pd.Timedelta(days=7), "1D": pd.Timedelta(days=1),
            "4H": pd.Timedelta(hours=4), "30m": pd.Timedelta(minutes=30),
            "15m": pd.Timedelta(minutes=15), "3m": pd.Timedelta(minutes=3)}
-SLICE = 200          # bars of context handed to the engine (plenty for RSI 9 / SMA 14 / swings 14)
+SLICE = 320          # bars of context handed to the engine (plenty for RSI 9 / SMA 14 / swings 14)
 MIN_SAMPLE = 30      # below this, no expectancy claim is made
 
 
@@ -130,7 +130,9 @@ def run(args):
     # using its hardcoded 3m/15m triggers and "--exec-tf 4H" would silently test
     # something else entirely.
     cfg.EXEC_TFS = (args.exec_tf,)
-    print(f"[conf] entries triggered by: {args.exec_tf}   source: {args.source}")
+    cfg.USE_TREND_FILTER = not args.no_trend_filter
+    print(f"[conf] entries triggered by: {args.exec_tf}   source: {args.source}"
+          f"   trend filter: {'ON' if cfg.USE_TREND_FILTER else 'OFF'}")
 
     tfs = [t for t in ALL_TFS if t != "3m" or args.exec_tf == "3m"]
     prices = load_prices(tfs, args.bars, args.refresh, args.source)
@@ -368,6 +370,8 @@ def main():
     p.add_argument("--cost-r", type=float, default=0.05,
                    help="spread+commission per trade, in R (default 0.05)")
     p.add_argument("--with-cot", action="store_true", help="use real CFTC COT history")
+    p.add_argument("--no-trend-filter", action="store_true",
+                   help="allow trades against the primary trend (for A/B comparison)")
     p.add_argument("--refresh", action="store_true", help="re-download price data")
     p.add_argument("--csv", help="write every trade to this CSV")
     args = p.parse_args()
