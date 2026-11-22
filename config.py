@@ -24,6 +24,7 @@ class Config:
     MIN_CONVICTION = int(os.getenv("MIN_CONVICTION", 25))
     MIN_STOP_ATR = float(os.getenv("MIN_STOP_ATR", 0.5))   # stop never tighter than 0.5x ATR
     MAX_TP_R = float(os.getenv("MAX_TP_R", 6.0))           # TP2 never further than 6R
+    TP2_MIN_R = float(os.getenv("TP2_MIN_R", 1.5))         # ...nor nearer than 1.5R
 
     # --- keys ---
     ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
