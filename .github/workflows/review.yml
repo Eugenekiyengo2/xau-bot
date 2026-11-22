@@ -1,0 +1,17 @@
+name: Review forward test
+
+# Manual only. Open the Actions tab, pick this workflow, click "Run workflow",
+# then read how the LIVE signals have actually performed in the job log.
+on:
+  workflow_dispatch: {}
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python review.py

@@ -5,6 +5,10 @@ on:
     - cron: "*/15 6-21 * * 1-5"
   workflow_dispatch: {}
 
+# needed so the run can commit journal.csv back to the repository
+permissions:
+  contents: write
+
 jobs:
   analyse:
     runs-on: ubuntu-latest
@@ -30,3 +34,19 @@ jobs:
           USE_COT: "true"
           USE_CALENDAR: "true"
           ALERT_ON: actionable
+
+      # The forward-test record. Each run is a fresh machine, so the journal only
+      # survives by being committed back. Pull-rebase first because runs can overlap.
+      - name: Save the signal journal
+        if: always()
+        run: |
+          if [ -f journal.csv ] && ! git diff --quiet -- journal.csv 2>/dev/null; then
+            git config user.name  "xau-bot"
+            git config user.email "actions@users.noreply.github.com"
+            git add journal.csv
+            git commit -m "journal: update $(date -u +%Y-%m-%dT%H:%MZ) [skip ci]"
+            git pull --rebase --autostash origin ${{ github.ref_name }} || true
+            git push origin HEAD:${{ github.ref_name }} || echo "push skipped"
+          else
+            echo "journal unchanged"
+          fi
