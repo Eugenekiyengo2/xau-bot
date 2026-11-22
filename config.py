@@ -25,6 +25,8 @@ class Config:
     MIN_STOP_ATR = float(os.getenv("MIN_STOP_ATR", 0.5))   # stop never tighter than 0.5x ATR
     MAX_TP_R = float(os.getenv("MAX_TP_R", 6.0))           # TP2 never further than 6R
     TP2_MIN_R = float(os.getenv("TP2_MIN_R", 1.5))         # ...nor nearer than 1.5R
+    # which timeframes may fire an entry; the rest only set posture
+    EXEC_TFS = tuple(t.strip() for t in os.getenv("EXEC_TFS", "3m,15m").split(",") if t.strip())
 
     # --- keys ---
     ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")

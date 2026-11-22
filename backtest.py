@@ -41,29 +41,35 @@ BAR_LEN = {"1W": pd.Timedelta(days=7), "1D": pd.Timedelta(days=1),
            "4H": pd.Timedelta(hours=4), "30m": pd.Timedelta(minutes=30),
            "15m": pd.Timedelta(minutes=15), "3m": pd.Timedelta(minutes=3)}
 SLICE = 200          # bars of context handed to the engine (plenty for RSI 9 / SMA 14 / swings 14)
+MIN_SAMPLE = 30      # below this, no expectancy claim is made
 
 
 # ----------------------------------------------------------------- data
 
-def load_prices(tfs, bars: int, refresh: bool) -> dict[str, pd.DataFrame]:
+def load_prices(tfs, bars: int, refresh: bool, source: str) -> dict[str, pd.DataFrame]:
     os.makedirs(CACHE_DIR, exist_ok=True)
     out = {}
     for tf in tfs:
-        path = os.path.join(CACHE_DIR, f"{tf}.csv")
+        path = os.path.join(CACHE_DIR, f"{source}_{tf}.csv")
         if os.path.exists(path) and not refresh:
             df = pd.read_csv(path, parse_dates=["datetime"])
             print(f"[data] {tf:>3}: {len(df)} bars (cached)")
         else:
-            from bot import data_price
-            size = data_price.OUTPUTSIZE.copy()
-            size[tf] = bars
-            data_price.OUTPUTSIZE = size
-            df = data_price.fetch_ohlcv(tf, cfg)
+            if source == "yahoo":
+                from bot import data_yahoo
+                df = data_yahoo.fetch_ohlcv(tf, cfg)
+            else:
+                from bot import data_price
+                size = data_price.OUTPUTSIZE.copy()
+                size[tf] = bars
+                data_price.OUTPUTSIZE = size
+                df = data_price.fetch_ohlcv(tf, cfg)
             if df is None or df.empty:
                 print(f"[data] {tf:>3}: unavailable — skipped")
                 continue
             df.to_csv(path, index=False)
-            print(f"[data] {tf:>3}: {len(df)} bars (downloaded)")
+            span = f"{df['datetime'].iloc[0]:%Y-%m-%d} to {df['datetime'].iloc[-1]:%Y-%m-%d}"
+            print(f"[data] {tf:>3}: {len(df)} bars ({span})")
         if df is not None and not df.empty:
             out[tf] = df.sort_values("datetime").reset_index(drop=True)
     return out
@@ -120,11 +126,18 @@ def completed_slice(df: pd.DataFrame, tf: str, now) -> pd.DataFrame:
 
 
 def run(args):
+    # The chosen timeframe is what fires entries. Without this the engine would keep
+    # using its hardcoded 3m/15m triggers and "--exec-tf 4H" would silently test
+    # something else entirely.
+    cfg.EXEC_TFS = (args.exec_tf,)
+    print(f"[conf] entries triggered by: {args.exec_tf}   source: {args.source}")
+
     tfs = [t for t in ALL_TFS if t != "3m" or args.exec_tf == "3m"]
-    prices = load_prices(tfs, args.bars, args.refresh)
+    prices = load_prices(tfs, args.bars, args.refresh, args.source)
     if args.exec_tf not in prices:
         print(f"\nNo data for execution timeframe {args.exec_tf}. "
-              f"Run with --refresh and a valid TWELVEDATA_API_KEY.")
+              f"With --source twelvedata you need a valid TWELVEDATA_API_KEY; "
+              f"--source yahoo needs no key.")
         return 1
 
     ex = prices[args.exec_tf]
@@ -301,16 +314,32 @@ def report(trades: list, args):
 
     if best:
         name, s = best
+        n = s["trades"]
         print("\n" + "-" * 64)
-        print(f"Best policy here: {name} — {s['total_r']:+.2f}R over {s['trades']} trades "
+        print(f"Highest-scoring policy: {name} — {s['total_r']:+.2f}R over {n} trades "
               f"({s['avg_r']:+.2f}R each), worst drawdown {s['max_dd_r']:.2f}R.")
-        verdict = ("POSITIVE expectancy in this sample." if s["avg_r"] > 0
-                   else "NEGATIVE expectancy — these rules lost money here.")
-        print(f"Verdict: {verdict}")
-        if s["trades"] < 30:
-            print("WARNING: fewer than 30 trades. This is too small a sample to trust;")
-            print("         the result could easily be luck. Gather more history.")
-        print("Costs are included. Slippage and weekend gaps are not.")
+
+        # Honest verdict. Below a usable sample size, say nothing about expectancy:
+        # picking the best of four policies makes even a coin flip look profitable.
+        if n < MIN_SAMPLE:
+            print(f"\nVERDICT: INCONCLUSIVE — {n} trades is far too few to judge.")
+            print("  Picking the best of four exit policies on a sample this small makes")
+            print("  even a no-edge strategy look profitable most of the time. Treat the")
+            print(f"  numbers above as noise until you have at least {MIN_SAMPLE} trades.")
+        else:
+            # confidence interval on the mean, so the reader sees the uncertainty
+            arr = np.array([r for r in dict(rows)[name] if r is not None])
+            se = arr.std(ddof=1) / np.sqrt(n)
+            lo, hi = s["avg_r"] - 2 * se, s["avg_r"] + 2 * se
+            print(f"\n  95% confidence range for average R: {lo:+.2f} to {hi:+.2f}")
+            if lo > 0:
+                print("VERDICT: POSITIVE expectancy — the edge survives the uncertainty.")
+            elif hi < 0:
+                print("VERDICT: NEGATIVE expectancy — these rules lost money here.")
+            else:
+                print("VERDICT: UNPROVEN — the range includes zero, so no edge is")
+                print("  demonstrated either way. More trades needed.")
+        print("\nCosts are included. Slippage and weekend gaps are not.")
 
     if args.csv:
         rowsout = []
@@ -332,7 +361,10 @@ def main():
     p = argparse.ArgumentParser(description="Backtest the XAU confluence engine.")
     p.add_argument("--exec-tf", default="15m", choices=list(ALL_TFS),
                    help="timeframe that triggers entries (default 15m)")
-    p.add_argument("--bars", type=int, default=2000, help="bars of history to download")
+    p.add_argument("--source", default="yahoo", choices=["yahoo", "twelvedata"],
+                   help="yahoo = deep free history, no key (default); twelvedata = your live feed")
+    p.add_argument("--bars", type=int, default=2000,
+                   help="bars to download (twelvedata only; yahoo returns its maximum)")
     p.add_argument("--cost-r", type=float, default=0.05,
                    help="spread+commission per trade, in R (default 0.05)")
     p.add_argument("--with-cot", action="store_true", help="use real CFTC COT history")
