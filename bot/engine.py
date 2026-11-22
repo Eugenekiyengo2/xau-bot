@@ -148,30 +148,39 @@ def build_signal(reads: dict[str, TFRead], macro: MacroRead, cfg) -> Signal:
             low = lvls.swing_low if lvls.swing_low is not None else entry - buf * 5
             stop = min(low - buf, entry - min_risk)
             risk = entry - stop
-            struct = lvls.swing_high
-            tp2 = _struct_target(struct, entry, risk, +1, cfg)
-            tps = [entry + risk, tp2, entry + 3 * risk]
+            tps = _targets(entry, risk, lvls.swing_high, +1, cfg)
         else:
             high = lvls.swing_high if lvls.swing_high is not None else entry + buf * 5
             stop = max(high + buf, entry + min_risk)
             risk = stop - entry
-            struct = lvls.swing_low
-            tp2 = _struct_target(struct, entry, risk, -1, cfg)
-            tps = [entry - risk, tp2, entry - 3 * risk]
+            tps = _targets(entry, risk, lvls.swing_low, -1, cfg)
 
         sig.entry, sig.stop, sig.risk = round(entry, 2), round(stop, 2), round(risk, 2)
         sig.tps = [round(t, 2) for t in tps]
     return sig
 
 
-def _struct_target(struct, entry: float, risk: float, direction: int, cfg) -> float:
-    """TP2 aims at the opposing structure, but never further than MAX_TP_R of risk —
-    an unreachable target is not a plan, and it distorts any performance measurement."""
-    floor_ = entry + direction * risk
-    cap = entry + direction * cfg.MAX_TP_R * risk
-    if struct is None or direction * (struct - floor_) <= 0:
-        return entry + direction * 2 * risk
-    return struct if direction * (cap - struct) >= 0 else cap
+def _targets(entry: float, risk: float, struct, d: int, cfg) -> list:
+    """A ladder that is always ordered TP1 < TP2 < TP3 in the trade's direction.
+
+    TP1 banks 1R. TP2 aims at the opposing structure, where price is most likely to
+    react, clamped so it sits neither on top of TP1 nor out of reach. TP3 always sits
+    beyond TP2 — a numbered target that is nearer than the one before it is a bug.
+    """
+    tp1 = entry + d * risk
+    near = entry + d * cfg.TP2_MIN_R * risk          # TP2 must clear this
+    cap = entry + d * cfg.MAX_TP_R * risk            # ...and not exceed this
+
+    if struct is None or d * (struct - near) <= 0:
+        tp2 = entry + d * 2.0 * risk                 # no usable structure: plain 2R
+    else:
+        tp2 = struct if d * (cap - struct) >= 0 else cap
+
+    tp3 = tp2 + d * risk                             # always one more R beyond TP2
+    stretch = entry + d * 3.0 * risk
+    if d * (stretch - tp3) > 0:                      # ...or 3R, whichever is further
+        tp3 = stretch
+    return [tp1, tp2, tp3]
 
 
 def _last(a):
