@@ -1,50 +1,77 @@
-"""Read the forward-test journal and report how the LIVE signals have actually done.
+"""Read the forward-test journals and report how the LIVE signals have actually done.
 
   python review.py
 
-Unlike a backtest, nothing here benefits from hindsight: every row was written before
-its outcome was known. This is the number that decides whether the strategy works.
+One journal per market (XAUUSD_journal.csv, EURUSD_journal.csv, ...). Every row was
+written before its outcome was known, so unlike a backtest nothing here benefits from
+hindsight. This is the number that decides whether the strategy works.
 """
+import glob
 import sys
 
 import pandas as pd
 
-from config import cfg
 from bot import journal
 
+SUFFIX = "_journal.csv"
 
-def main():
-    df = journal.load(cfg.JOURNAL_FILE)
-    print("=" * 60)
-    print("FORWARD TEST — live signals, no hindsight")
-    print("=" * 60)
+
+def report(name: str, df: pd.DataFrame):
+    print(f"\n{'-'*60}\n{name}\n{'-'*60}")
     print(journal.summary(df))
     if df.empty:
-        print("\nThe bot writes a row here each time it fires a LONG or SHORT.")
-        return 0
-
+        return
     done = df[df["status"].astype(str) != journal.OPEN]
     if not done.empty:
-        print("\nBy outcome:")
-        for status, n in done["status"].value_counts().items():
-            print(f"  {status:<6} {n}")
+        counts = "  ".join(f"{k}:{v}" for k, v in done["status"].value_counts().items())
         longs = (done["dir"] == "LONG").sum()
-        print(f"\nDirection: {longs} long / {len(done)-longs} short")
+        print(f"Outcomes: {counts}")
+        print(f"Direction: {longs} long / {len(done)-longs} short")
         rs = pd.to_numeric(done["result_r"], errors="coerce").dropna()
         if len(rs):
             eq = rs.cumsum()
             print(f"Worst drawdown: {float((eq.cummax()-eq).max()):.2f}R")
-
     openn = df[df["status"].astype(str) == journal.OPEN]
-    if not openn.empty:
-        print("\nStill open:")
-        for _, r in openn.iterrows():
-            print(f"  {r['opened_utc']}  {r['dir']}  entry {r['entry']}  "
-                  f"stop {r['stop']}  best so far {r['best_r']}R")
+    for _, r in openn.iterrows():
+        print(f"  OPEN  {r['opened_utc']}  {r['dir']}  entry {r['entry']}  "
+              f"stop {r['stop']}  best so far {r['best_r']}R")
 
-    print("\nLast 10 recorded signals:")
-    cols = ["opened_utc", "dir", "entry", "stop", "conviction", "status", "result_r"]
-    print(df[cols].tail(10).to_string(index=False))
+
+def main():
+    paths = sorted(glob.glob("*" + SUFFIX))
+    print("=" * 60)
+    print("FORWARD TEST — live signals, no hindsight")
+    print("=" * 60)
+    if not paths:
+        print("\nNo journals yet. The bot writes one row per market each time it")
+        print("fires a LONG or SHORT, so nothing appears until a real signal lands.")
+        return 0
+
+    everything = []
+    for p in paths:
+        market = p[:-len(SUFFIX)]
+        df = journal.load(p)
+        report(market, df)
+        if not df.empty:
+            df = df.copy()
+            df["market"] = market
+            everything.append(df)
+
+    if len(everything) > 1:
+        allrows = pd.concat(everything, ignore_index=True)
+        print(f"\n{'='*60}\nALL MARKETS COMBINED\n{'='*60}")
+        print(journal.summary(allrows))
+        done = allrows[allrows["status"].astype(str) != journal.OPEN]
+        if not done.empty:
+            rs = pd.to_numeric(done["result_r"], errors="coerce").dropna()
+            print("\nPer market:")
+            for m, g in done.groupby("market"):
+                v = pd.to_numeric(g["result_r"], errors="coerce").dropna()
+                if len(v):
+                    print(f"  {m:<10} {len(v):>3} trades   {v.sum():+7.2f}R   avg {v.mean():+.2f}R")
+            if len(rs) < 30:
+                print(f"\nStill only {len(rs)} resolved trades in total. Needs 30+ before")
+                print("any of these numbers mean anything.")
     return 0
 
 
