@@ -51,6 +51,8 @@ class Config:
     # --- behaviour ---
     ALERT_ON = os.getenv("ALERT_ON", "actionable")    # "actionable" | "always"
     STATE_FILE = os.getenv("STATE_FILE", "last_state.json")
+    JOURNAL_FILE = os.getenv("JOURNAL_FILE", "journal.csv")
+    USE_JOURNAL = _b("USE_JOURNAL", True)
 
 
 cfg = Config()

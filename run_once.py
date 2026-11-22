@@ -16,7 +16,9 @@ from bot import engine, alerts
 
 
 def gather_reads():
-    reads = {}
+    """Returns (readings, raw candles). The candles are kept so the journal can
+    resolve earlier signals against the price action that has printed since."""
+    reads, frames = {}, {}
     if cfg.SOURCE == "vision":
         from bot import vision
         reads = vision.read_all(cfg)
@@ -25,8 +27,9 @@ def gather_reads():
         for tf in ("1W", "1D", "4H", "30m", "15m", "3m"):
             df = data_price.fetch_ohlcv(tf, cfg)
             if df is not None and len(df):
+                frames[tf] = df
                 reads[tf] = engine.read_from_df(tf, df, cfg)
-    return reads
+    return reads, frames
 
 
 def gather_macro() -> MacroRead:
@@ -70,8 +73,31 @@ def should_alert(sig) -> bool:
     return actionable and key != prev
 
 
+def update_journal(sig, frames):
+    """Record this signal and settle any earlier one against the price since."""
+    if not getattr(cfg, "USE_JOURNAL", True):
+        return
+    try:
+        from bot import journal
+        df = journal.load(cfg.JOURNAL_FILE)
+
+        # resolve open entries using the finest timeframe we have candles for
+        candles = next((frames[tf] for tf in ("3m", "15m", "30m", "4H") if tf in frames), None)
+        df, closed = journal.resolve(df, candles)
+        for c in closed:
+            print(f"[journal] {c['id']} closed: {c['status']} ({c['result_r']:+.2f}R)")
+
+        df, added = journal.append_signal(df, sig)
+        if added:
+            print(f"[journal] recorded new {sig.bias} signal")
+        journal.save(df, cfg.JOURNAL_FILE)
+        print("[journal] " + journal.summary(df).replace("\n", "\n[journal] "))
+    except Exception as e:  # noqa - the journal must never break the alert
+        print(f"[journal] skipped: {e}")
+
+
 def main():
-    reads = gather_reads()
+    reads, frames = gather_reads()
     if not reads:
         print("No timeframe readings — check SOURCE / API key / chart images.")
         sys.exit(1)
@@ -80,6 +106,7 @@ def main():
     text = alerts.format_signal(sig, macro)
     print(text)
     print("-" * 40)
+    update_journal(sig, frames)
     if should_alert(sig):
         alerts.send_telegram(text, cfg)
         alerts.send_whatsapp(text, cfg)
