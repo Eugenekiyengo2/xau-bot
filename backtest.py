@@ -187,6 +187,7 @@ def run(args):
 
         if sig.bias in ("LONG", "SHORT") and sig.entry and sig.stop and sig.risk and sig.risk > 0:
             open_trade = {
+                "idx": i,
                 "opened": now, "dir": sig.bias, "entry": sig.entry, "stop": sig.stop,
                 "tps": sig.tps, "risk": sig.risk, "conviction": sig.conviction,
                 "posture": sig.posture, "hit": [], "closed": None, "exit": None,
@@ -197,6 +198,7 @@ def run(args):
         open_trade["exit"] = "still open at end of data"
         trades.append(open_trade)
 
+    args._benchmark = random_benchmark(ex, trades, args.cost_r)
     report(trades, args)
     return 0
 
@@ -255,6 +257,66 @@ def scaled_r(t: dict, cost_r: float) -> float | None:
     if 3 in t["hit"]:
         r += 0.2 * (abs(t["tps"][2] - t["entry"]) / t["risk"])
     return r - cost_r
+
+
+def random_benchmark(ex: pd.DataFrame, trades: list, cost_r: float, runs: int = 400) -> dict | None:
+    """Do the ENTRIES add value, or would any entry have worked?
+
+    This is the question a profitable-looking long-only backtest cannot answer on its
+    own: if the market rose tenfold, buying at random dates also makes money. So we
+    re-run the strategy's own trade count, direction mix and exit rules from RANDOM
+    dates, several hundred times, and see where the real result falls in that
+    distribution. Beating 95% of random entries is evidence of timing skill. Landing
+    mid-pack means the trend did the work, not the signal.
+    """
+    from bot import indicators as ind
+    usable = [t for t in trades if t.get("idx") is not None]
+    if len(usable) < 5:
+        return None
+
+    atr = ind.atr_wilder(ex, 14)
+    # express each real stop as a multiple of ATR, so random trades are risked alike
+    ratios = [t["risk"] / atr[t["idx"]] for t in usable
+              if t["idx"] < len(atr) and atr[t["idx"]] and not np.isnan(atr[t["idx"]])]
+    if not ratios:
+        return None
+    ratio = float(np.median(ratios))
+    dirs = [t["dir"] for t in usable]
+    lo, hi = 60, len(ex) - 2
+    if hi <= lo:
+        return None
+
+    rng = np.random.default_rng(12345)
+    means = []
+    for _ in range(runs):
+        rs = []
+        for d in dirs:
+            i = int(rng.integers(lo, hi))
+            a = atr[i]
+            if a is None or np.isnan(a) or a <= 0:
+                continue
+            entry = float(ex["close"].iloc[i])
+            risk = ratio * a
+            stop = entry - risk if d == "LONG" else entry + risk
+            sign = 1 if d == "LONG" else -1
+            tps = [entry + sign * risk, entry + sign * 2 * risk, entry + sign * 3 * risk]
+            t = {"dir": d, "entry": entry, "stop": stop, "tps": tps, "risk": risk,
+                 "hit": [], "closed": None, "exit": None, "bars": 0, "mfe_r": 0.0}
+            for j in range(i + 1, len(ex)):
+                if update_trade(t, ex.iloc[j]):
+                    break
+            if t["exit"] is None:
+                t["exit"] = "end"
+            r = scaled_r(t, cost_r)
+            if r is not None:
+                rs.append(r)
+        if rs:
+            means.append(float(np.mean(rs)))
+    if not means:
+        return None
+    return {"runs": len(means), "mean": float(np.mean(means)),
+            "p5": float(np.percentile(means, 5)), "p95": float(np.percentile(means, 95)),
+            "dist": np.array(means)}
 
 
 def stats(rs: list[float]) -> dict:
@@ -342,6 +404,28 @@ def report(trades: list, args):
                 print("VERDICT: UNPROVEN — the range includes zero, so no edge is")
                 print("  demonstrated either way. More trades needed.")
         print("\nCosts are included. Slippage and weekend gaps are not.")
+
+    # --- do the entries actually add anything over entering at random? ---
+    bm = args.__dict__.get("_benchmark")
+    if bm:
+        real = stats([scaled_r(t, args.cost_r) for t in trades]).get("avg_r")
+        pct = 100.0 * float((bm["dist"] < real).mean())
+        print("\n" + "-" * 64)
+        print("ENTRY-TIMING TEST (same trade count, same long/short mix, random dates)")
+        print(f"  random entries : {bm['mean']:+.2f}R average "
+              f"(90% of runs between {bm['p5']:+.2f} and {bm['p95']:+.2f})")
+        print(f"  your signals   : {real:+.2f}R average")
+        edge = real - bm["mean"]
+        print(f"  attributable to the market : {bm['mean']:+.2f}R")
+        print(f"  attributable to your timing: {edge:+.2f}R   (beats {pct:.0f}% of random runs)")
+        if pct >= 95 and edge > 0:
+            print("  => The entries add real value beyond the market's drift.")
+        elif pct >= 90 and edge > 0:
+            print("  => Suggestive but not conclusive at this sample size.")
+        else:
+            print("  => NO timing edge demonstrated. Random entries did about as well,")
+            print("     so the return comes from the market's direction, not the signal.")
+            print("     A rising market makes almost any long strategy look profitable.")
 
     if args.csv:
         rowsout = []
