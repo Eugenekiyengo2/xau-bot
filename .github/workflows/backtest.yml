@@ -22,6 +22,11 @@ on:
         description: "Include real CFTC COT history"
         default: true
         type: boolean
+      tp_count:
+        description: "How many take-profit levels (3 = original, 6 = extended)"
+        default: "6"
+        type: choice
+        options: ["3", "6"]
       trend_filter:
         description: "Refuse trades that fight the primary trend (untick to compare)"
         default: true
@@ -41,6 +46,7 @@ jobs:
           python backtest.py \
             --source "${{ inputs.source }}" \
             --exec-tf "${{ inputs.exec_tf }}" \
+            --tp-count "${{ inputs.tp_count }}" \
             --bars "${{ inputs.bars }}" \
             --refresh \
             ${{ inputs.with_cot && '--with-cot' || '' }} \
