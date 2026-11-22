@@ -1,6 +1,6 @@
 # XAUUSD Confluence Bot
 
-A deployable gold bot that runs on a schedule with **zero uploads**. Each cycle it reads
+A deployable bot that runs on a schedule with **zero uploads**. Each cycle it reads
 the six timeframes (1W, 1D, 4H, 30m, 15m, 3m), derives the institutional posture from the
 RSI structure, confirms it against COT, checks the news calendar, builds the trade
 (entry / stop / TP1–TP3), and sends it to Telegram or WhatsApp — only when something
