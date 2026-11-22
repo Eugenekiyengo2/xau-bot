@@ -20,7 +20,8 @@ def format_signal(sig: Signal, macro: MacroRead) -> str:
             f"TP2   : {sig.tps[1]}",
             f"TP3   : {sig.tps[2]}  (3R)",
         ]
-    tb = "  ".join(f"{k}:{v[0].upper()}" for k, v in sig.tf_bias.items())
+    label = {"bull": "BULL", "bear": "BEAR", "neu": "—"}
+    tb = "  ".join(f"{k}:{label.get(v, v)}" for k, v in sig.tf_bias.items())
     if tb:
         lines += ["", f"TF bias: {tb}"]
     lines += ["", "Why:"]
