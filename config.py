@@ -22,6 +22,8 @@ class Config:
     SWING_LEN = int(os.getenv("SWING_LEN", 14))
     STOP_BUFFER_PCT = float(os.getenv("STOP_BUFFER_PCT", 0.0008))  # 0.08% beyond swept wick
     MIN_CONVICTION = int(os.getenv("MIN_CONVICTION", 25))
+    MIN_STOP_ATR = float(os.getenv("MIN_STOP_ATR", 0.5))   # stop never tighter than 0.5x ATR
+    MAX_TP_R = float(os.getenv("MAX_TP_R", 6.0))           # TP2 never further than 6R
 
     # --- keys ---
     ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
