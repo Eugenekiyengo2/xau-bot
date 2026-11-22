@@ -9,7 +9,7 @@ from . import indicators as ind
 
 WEIGHTS = {"1W": 3.0, "1D": 2.5, "4H": 1.5, "30m": 1.0, "15m": 0.8, "3m": 0.5}
 HTF = ("1W", "1D")            # define bank positioning
-EXEC = ("3m", "15m")          # fire the entry
+EXEC = ("3m", "15m")          # default; overridden by cfg.EXEC_TFS when set
 
 
 def read_from_df(tf: str, df: pd.DataFrame, cfg) -> TFRead:
@@ -97,7 +97,7 @@ def build_signal(reads: dict[str, TFRead], macro: MacroRead, cfg) -> Signal:
     # execution trigger must agree with posture
     ex_long = ex_short = False
     lvls = None
-    for tf in EXEC:
+    for tf in (getattr(cfg, "EXEC_TFS", None) or EXEC):
         r = reads.get(tf)
         if not r:
             continue
