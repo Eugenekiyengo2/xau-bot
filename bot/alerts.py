@@ -5,14 +5,29 @@ import requests
 from .models import Signal, MacroRead
 
 
-def format_signal(sig: Signal, macro: MacroRead) -> str:
+def format_signal(sig: Signal, macro: MacroRead, cfg=None, symbol: str = "") -> str:
+    if cfg is None:
+        from config import cfg as _c; cfg = _c
     emoji = {"LONG": "🟢", "SHORT": "🔴", "WAIT": "⚪"}.get(sig.bias, "⚪")
     lines = [
-        f"{emoji} XAUUSD — {sig.bias}  ({sig.posture})",
+        f"{emoji} {sig.bias}  ({sig.posture})",
         f"Conviction: {sig.conviction}/100",
     ]
     if sig.bias in ("LONG", "SHORT") and sig.entry is not None:
         lines += ["", f"Entry : {sig.entry}", f"Stop  : {sig.stop}   (risk {sig.risk})"]
+        try:
+            from . import position
+            sz = position.size(symbol or "XAU/USD", sig.entry, sig.stop,
+                               cfg.ACCOUNT_BALANCE, cfg.RISK_PCT)
+            lines.append(f"Size  : {sz['lots']} lots  "
+                         f"= ${sz['risk_cash']:,.2f} at risk ({sz['risk_pct_actual']:.1%})")
+            if sz.get("note"):
+                lines.append(f"  ! {sz['note']}")
+            mn = position.margin_note(sz["notional"], cfg.ACCOUNT_BALANCE, cfg.LEVERAGE)
+            if mn:
+                lines.append(f"  ! {mn}")
+        except Exception as e:  # noqa
+            lines.append(f"Size  : unavailable ({e})")
         from .engine import tp_weights
         w = tp_weights(len(sig.tps))
         for i, tp in enumerate(sig.tps):

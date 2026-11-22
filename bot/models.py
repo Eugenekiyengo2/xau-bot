@@ -15,11 +15,16 @@ class TFRead:
     bias: str = "neu"             # "bull" | "bear" | "neu"
     divergence: str = "none"      # "bull" | "bear" | "none"
     sweep: str = "none"           # "bull" | "bear" | "none"
+    sweep_level: Optional[float] = None  # the price level that was grabbed
+    mss: bool = False             # structure shifted in the sweep direction?
+    fvg: Optional[tuple] = None   # (low, high) of the imbalance to enter in
+    sweep_wick: Optional[float] = None   # invalidation point of the grab
     price: Optional[float] = None
     swing_low: Optional[float] = None
     swing_high: Optional[float] = None
     atr: Optional[float] = None   # volatility, used to floor the stop distance
     trend_up: Optional[bool] = None  # price above its long moving average?
+    ts: object = None             # timestamp of the last bar
     source: str = "data"          # "data" | "vision"
 
     def dict(self):
@@ -35,6 +40,13 @@ class MacroRead:
     usd_stance: str = "neu"       # "bull" (USD weak, gold-supportive) ... see note in cot/usd
     news_red_near: bool = False
     next_event: Optional[str] = None
+    usd_note: str = ""
+    sentiment_stance: str = "neu"   # contrarian read of the crowd
+    sentiment_note: str = ""
+    session_bias: str = "neu"       # Asia -> London -> New York cascade
+    session_note: str = ""
+    vol_regime: str = "normal"      # "low" | "normal" | "high"
+    vol_note: str = ""
     notes: list = field(default_factory=list)
 
 
@@ -49,3 +61,4 @@ class Signal:
     risk: Optional[float] = None
     reasons: list = field(default_factory=list)
     tf_bias: dict = field(default_factory=dict)
+    sweep_level: Optional[float] = None  # identifies the setup, so one grab = one alert
