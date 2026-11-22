@@ -1,0 +1,21 @@
+name: Position size
+
+# Manual. Tells you how much to risk per trade based on what the journal has
+# actually measured — not on what the strategy is hoped to do.
+on:
+  workflow_dispatch:
+    inputs:
+      balance:
+        description: "Account balance"
+        default: "1000"
+
+jobs:
+  sizing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python sizing.py "${{ inputs.balance }}"

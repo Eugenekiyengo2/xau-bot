@@ -2,7 +2,7 @@ name: XAU confluence bot
 
 on:
   schedule:
-    - cron: "*/15 6-21 * * 1-5"
+    - cron: "*/20 7-10,12-15 * * 1-5"
   workflow_dispatch: {}
 
 # needed so the run can commit journal.csv back to the repository
@@ -26,7 +26,7 @@ jobs:
       - run: python run_once.py
         env:
           SOURCE: data
-          SYMBOL: XAU/USD
+          SYMBOLS: "XAU/USD,EUR/USD,GBP/USD,USD/JPY"
           TWELVEDATA_API_KEY: ${{ secrets.TWELVEDATA_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -35,16 +35,23 @@ jobs:
           USE_CALENDAR: "true"
           ALERT_ON: actionable
           TP_COUNT: "6"
+          SWEEP_LOOKBACK: "30"
+          KILLZONES: "7-11,12-16"
+          PRECISION_ENTRY: "true"
+          REQUIRE_MSS: "true"
+          LEVERAGE: "500"
+          RISK_PCT: "0.214"
+          ACCOUNT_BALANCE: "1000"
 
       # The forward-test record. Each run is a fresh machine, so the journal only
       # survives by being committed back. Pull-rebase first because runs can overlap.
       - name: Save the signal journal
         if: always()
         run: |
-          if [ -f journal.csv ] && ! git diff --quiet -- journal.csv 2>/dev/null; then
+          if ls *_journal.csv >/dev/null 2>&1 && [ -n "$(git status --porcelain -- '*_journal.csv')" ]; then
             git config user.name  "xau-bot"
             git config user.email "actions@users.noreply.github.com"
-            git add journal.csv
+            git add ./*_journal.csv
             git commit -m "journal: update $(date -u +%Y-%m-%dT%H:%MZ) [skip ci]"
             git pull --rebase --autostash origin ${{ github.ref_name }} || true
             git push origin HEAD:${{ github.ref_name }} || echo "push skipped"
