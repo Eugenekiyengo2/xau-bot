@@ -26,6 +26,8 @@ def read_from_df(tf: str, df: pd.DataFrame, cfg) -> TFRead:
     r.bb_upper = _last(up)
     r.bb_lower = _last(lo)
 
+    r.atr = _last(ind.atr_wilder(df, 14))
+
     highs, lows = ind.find_pivots(df, cfg.SWING_LEN)
     last_high = highs[-1] if highs else None
     last_low = lows[-1] if lows else None
@@ -138,25 +140,38 @@ def build_signal(reads: dict[str, TFRead], macro: MacroRead, cfg) -> Signal:
     if bias in ("LONG", "SHORT") and lvls and lvls.price is not None:
         entry = lvls.price
         buf = cfg.STOP_BUFFER_PCT * entry
+        # Floor the stop distance. A stop tighter than a fraction of ATR is inside the
+        # spread/noise: it would be taken out by ordinary jitter, so it is not a trade.
+        min_risk = cfg.MIN_STOP_ATR * lvls.atr if lvls.atr else buf * 2
+
         if bias == "LONG":
             low = lvls.swing_low if lvls.swing_low is not None else entry - buf * 5
-            stop = low - buf
+            stop = min(low - buf, entry - min_risk)
             risk = entry - stop
             struct = lvls.swing_high
-            tps = [entry + risk,
-                   struct if (struct and struct > entry + risk) else entry + 2 * risk,
-                   entry + 3 * risk]
+            tp2 = _struct_target(struct, entry, risk, +1, cfg)
+            tps = [entry + risk, tp2, entry + 3 * risk]
         else:
             high = lvls.swing_high if lvls.swing_high is not None else entry + buf * 5
-            stop = high + buf
+            stop = max(high + buf, entry + min_risk)
             risk = stop - entry
             struct = lvls.swing_low
-            tps = [entry - risk,
-                   struct if (struct and struct < entry - risk) else entry - 2 * risk,
-                   entry - 3 * risk]
+            tp2 = _struct_target(struct, entry, risk, -1, cfg)
+            tps = [entry - risk, tp2, entry - 3 * risk]
+
         sig.entry, sig.stop, sig.risk = round(entry, 2), round(stop, 2), round(risk, 2)
         sig.tps = [round(t, 2) for t in tps]
     return sig
+
+
+def _struct_target(struct, entry: float, risk: float, direction: int, cfg) -> float:
+    """TP2 aims at the opposing structure, but never further than MAX_TP_R of risk —
+    an unreachable target is not a plan, and it distorts any performance measurement."""
+    floor_ = entry + direction * risk
+    cap = entry + direction * cfg.MAX_TP_R * risk
+    if struct is None or direction * (struct - floor_) <= 0:
+        return entry + direction * 2 * risk
+    return struct if direction * (cap - struct) >= 0 else cap
 
 
 def _last(a):
