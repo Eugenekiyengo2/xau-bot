@@ -131,8 +131,11 @@ def run(args):
     # something else entirely.
     cfg.EXEC_TFS = (args.exec_tf,)
     cfg.USE_TREND_FILTER = not args.no_trend_filter
+    if args.tp_count:
+        cfg.TP_COUNT = args.tp_count
     print(f"[conf] entries triggered by: {args.exec_tf}   source: {args.source}"
-          f"   trend filter: {'ON' if cfg.USE_TREND_FILTER else 'OFF'}")
+          f"   trend filter: {'ON' if cfg.USE_TREND_FILTER else 'OFF'}"
+          f"   targets: {cfg.TP_COUNT}")
 
     tfs = [t for t in ALL_TFS if t != "3m" or args.exec_tf == "3m"]
     prices = load_prices(tfs, args.bars, args.refresh, args.source)
@@ -223,8 +226,8 @@ def update_trade(t: dict, bar) -> bool:
     if stop_hit:
         t["closed"], t["exit"] = bar["datetime"], "stop"
         return True
-    if 3 in t["hit"]:
-        t["closed"], t["exit"] = bar["datetime"], "tp3"
+    if len(t["tps"]) in t["hit"]:
+        t["closed"], t["exit"] = bar["datetime"], f'tp{len(t["tps"])}'
         return True
     return False
 
@@ -243,19 +246,17 @@ def policy_r(t: dict, target: int, cost_r: float) -> float | None:
 
 
 def scaled_r(t: dict, cost_r: float) -> float | None:
-    """50% off at TP1 (stop to breakeven), 30% at TP2, 20% at TP3."""
+    """Scale out across the whole ladder; whatever is not banked at a target is
+    assumed to come off at breakeven, since the stop moves up after TP1."""
     if t["exit"] == "still open at end of data":
         return None
     if not t["hit"]:
         return -1.0 - cost_r
-    r = 0.0
-    r += 0.5 * (abs(t["tps"][0] - t["entry"]) / t["risk"])
-    if 2 in t["hit"]:
-        r += 0.3 * (abs(t["tps"][1] - t["entry"]) / t["risk"])
-    else:
-        r += 0.0                     # remainder stopped at breakeven
-    if 3 in t["hit"]:
-        r += 0.2 * (abs(t["tps"][2] - t["entry"]) / t["risk"])
+    from bot.engine import tp_weights
+    tps = t["tps"]
+    w = tp_weights(len(tps))
+    r = sum(w[n - 1] * (abs(tps[n - 1] - t["entry"]) / t["risk"])
+            for n in t["hit"] if n <= len(tps))
     return r - cost_r
 
 
@@ -282,6 +283,7 @@ def random_benchmark(ex: pd.DataFrame, trades: list, cost_r: float, runs: int = 
         return None
     ratio = float(np.median(ratios))
     dirs = [t["dir"] for t in usable]
+    nt = max(len(t["tps"]) for t in usable)
     lo, hi = 60, len(ex) - 2
     if hi <= lo:
         return None
@@ -299,7 +301,7 @@ def random_benchmark(ex: pd.DataFrame, trades: list, cost_r: float, runs: int = 
             risk = ratio * a
             stop = entry - risk if d == "LONG" else entry + risk
             sign = 1 if d == "LONG" else -1
-            tps = [entry + sign * risk, entry + sign * 2 * risk, entry + sign * 3 * risk]
+            tps = [entry + sign * k * risk for k in range(1, nt + 1)]
             t = {"dir": d, "entry": entry, "stop": stop, "tps": tps, "risk": risk,
                  "hit": [], "closed": None, "exit": None, "bars": 0, "mfe_r": 0.0}
             for j in range(i + 1, len(ex)):
@@ -356,16 +358,18 @@ def report(trades: list, args):
         longs = sum(1 for t in done if t["dir"] == "LONG")
         print(f"Direction: {longs} long / {len(done)-longs} short")
         print(f"Avg bars held: {np.mean([t['bars'] for t in done]):.0f}")
-        print(f"Reached TP1: {100*sum(1 for t in done if 1 in t['hit'])/len(done):.0f}%"
-              f"   TP2: {100*sum(1 for t in done if 2 in t['hit'])/len(done):.0f}%"
-              f"   TP3: {100*sum(1 for t in done if 3 in t['hit'])/len(done):.0f}%")
+        ntp_ = max((len(t["tps"]) for t in done), default=3)
+        hits = "   ".join(
+            f"TP{k}: {100*sum(1 for t in done if k in t['hit'])/len(done):.0f}%"
+            for k in range(1, ntp_ + 1))
+        print("Reached " + hits)
 
     print("\n%-14s %7s %9s %9s %8s %8s" % ("EXIT POLICY", "TRADES", "WIN %", "TOTAL R", "AVG R", "MAXDD"))
     print("-" * 64)
-    rows = [("exit at TP1", [policy_r(t, 1, args.cost_r) for t in trades]),
-            ("exit at TP2", [policy_r(t, 2, args.cost_r) for t in trades]),
-            ("exit at TP3", [policy_r(t, 3, args.cost_r) for t in trades]),
-            ("scaled out",  [scaled_r(t, args.cost_r) for t in trades])]
+    ntp = max((len(t["tps"]) for t in trades), default=3)
+    rows = [(f"exit at TP{k}", [policy_r(t, k, args.cost_r) for t in trades])
+            for k in range(1, ntp + 1)]
+    rows.append(("scaled out", [scaled_r(t, args.cost_r) for t in trades]))
     best = None
     for name, rs in rows:
         s = stats(rs)
@@ -433,10 +437,10 @@ def report(trades: list, args):
             rowsout.append({
                 "opened": t["opened"], "dir": t["dir"], "posture": t["posture"],
                 "conviction": t["conviction"], "entry": t["entry"], "stop": t["stop"],
-                "tp1": t["tps"][0], "tp2": t["tps"][1], "tp3": t["tps"][2],
+                "tps": "|".join(str(round(x, 2)) for x in t["tps"]),
                 "risk": t["risk"], "exit": t["exit"], "closed": t["closed"],
                 "bars": t["bars"], "best_R": round(t["mfe_r"], 2),
-                "r_tp1": policy_r(t, 1, args.cost_r), "r_tp2": policy_r(t, 2, args.cost_r),
+                "r_tp1": policy_r(t, 1, args.cost_r),
                 "r_scaled": scaled_r(t, args.cost_r),
             })
         pd.DataFrame(rowsout).to_csv(args.csv, index=False)
@@ -454,6 +458,8 @@ def main():
     p.add_argument("--cost-r", type=float, default=0.05,
                    help="spread+commission per trade, in R (default 0.05)")
     p.add_argument("--with-cot", action="store_true", help="use real CFTC COT history")
+    p.add_argument("--tp-count", type=int, default=None,
+                   help="number of take-profit levels (default from config, normally 3)")
     p.add_argument("--no-trend-filter", action="store_true",
                    help="allow trades against the primary trend (for A/B comparison)")
     p.add_argument("--refresh", action="store_true", help="re-download price data")

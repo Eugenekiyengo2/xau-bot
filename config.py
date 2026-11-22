@@ -25,6 +25,7 @@ class Config:
     MIN_STOP_ATR = float(os.getenv("MIN_STOP_ATR", 0.5))   # stop never tighter than 0.5x ATR
     MAX_TP_R = float(os.getenv("MAX_TP_R", 6.0))           # TP2 never further than 6R
     TP2_MIN_R = float(os.getenv("TP2_MIN_R", 1.5))         # ...nor nearer than 1.5R
+    TP_COUNT = int(os.getenv("TP_COUNT", 3))               # how many take-profit levels
     TREND_MA = int(os.getenv("TREND_MA", 200))          # long MA defining the primary trend
     USE_TREND_FILTER = _b("USE_TREND_FILTER", True)     # refuse trades that fight it
     # which timeframes may fire an entry; the rest only set posture
