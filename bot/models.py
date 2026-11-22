@@ -19,6 +19,7 @@ class TFRead:
     swing_low: Optional[float] = None
     swing_high: Optional[float] = None
     atr: Optional[float] = None   # volatility, used to floor the stop distance
+    trend_up: Optional[bool] = None  # price above its long moving average?
     source: str = "data"          # "data" | "vision"
 
     def dict(self):

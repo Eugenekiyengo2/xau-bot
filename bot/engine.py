@@ -28,6 +28,12 @@ def read_from_df(tf: str, df: pd.DataFrame, cfg) -> TFRead:
 
     r.atr = _last(ind.atr_wilder(df, 14))
 
+    # primary trend: price versus a long moving average
+    if len(close) >= cfg.TREND_MA:
+        ma = pd.Series(close).rolling(cfg.TREND_MA).mean().iloc[-1]
+        if not np.isnan(ma):
+            r.trend_up = bool(close[-1] > ma)
+
     highs, lows = ind.find_pivots(df, cfg.SWING_LEN)
     last_high = highs[-1] if highs else None
     last_low = lows[-1] if lows else None
@@ -127,6 +133,17 @@ def build_signal(reads: dict[str, TFRead], macro: MacroRead, cfg) -> Signal:
     else:
         reasons.append("Rotation — no clean institutional footprint. Stand aside.")
 
+    # Trend filter. The sweep trigger is structurally counter-trend: in a rising market
+    # price repeatedly pokes above old swing highs and closes back under them, firing
+    # short signals, while old swing lows are never revisited. Unfiltered, that means
+    # shorting a bull market. This refuses trades that fight the primary trend.
+    if getattr(cfg, "USE_TREND_FILTER", False) and dir_ != 0:
+        trend = _primary_trend(reads)
+        if trend is not None and ((dir_ > 0) != trend):
+            reasons.append(f"Blocked: {bias} against the primary "
+                           f"{'up' if trend else 'down'}trend ({cfg.TREND_MA}-period MA).")
+            bias, dir_ = "WAIT", 0
+
     conviction = min(100, int(abs(score) * 8 + (20 if dir_ else 0)))
     if macro.news_red_near:
         conviction = int(conviction * 0.4)
@@ -158,6 +175,15 @@ def build_signal(reads: dict[str, TFRead], macro: MacroRead, cfg) -> Signal:
         sig.entry, sig.stop, sig.risk = round(entry, 2), round(stop, 2), round(risk, 2)
         sig.tps = [round(t, 2) for t in tps]
     return sig
+
+
+def _primary_trend(reads: dict):
+    """Trend from the slowest timeframe that has one — the weekly outranks the daily."""
+    for tf in ("1W", "1D", "4H", "30m"):
+        r = reads.get(tf)
+        if r is not None and r.trend_up is not None:
+            return r.trend_up
+    return None
 
 
 def _targets(entry: float, risk: float, struct, d: int, cfg) -> list:
