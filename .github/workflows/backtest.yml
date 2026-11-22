@@ -5,13 +5,18 @@ name: Backtest
 on:
   workflow_dispatch:
     inputs:
-      exec_tf:
-        description: "Execution timeframe (which TF triggers entries)"
-        default: "15m"
+      source:
+        description: "Data source (yahoo = years of free history, no key)"
+        default: "yahoo"
         type: choice
-        options: ["3m", "15m", "30m", "4H"]
+        options: ["yahoo", "twelvedata"]
+      exec_tf:
+        description: "Which timeframe fires entries. Use 1D or 4H with yahoo for a long test."
+        default: "4H"
+        type: choice
+        options: ["3m", "15m", "30m", "4H", "1D"]
       bars:
-        description: "Bars of history to download (more = longer test)"
+        description: "Bars to download (twelvedata only; yahoo returns its maximum)"
         default: "2000"
       with_cot:
         description: "Include real CFTC COT history"
@@ -30,6 +35,7 @@ jobs:
       - name: Run backtest
         run: |
           python backtest.py \
+            --source "${{ inputs.source }}" \
             --exec-tf "${{ inputs.exec_tf }}" \
             --bars "${{ inputs.bars }}" \
             --refresh \
