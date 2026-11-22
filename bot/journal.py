@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 
 import pandas as pd
 
-COLUMNS = ["id", "opened_utc", "dir", "entry", "stop", "tp1", "tp2", "tp3", "risk",
+COLUMNS = ["id", "opened_utc", "dir", "entry", "stop", "tps", "risk",
            "conviction", "posture", "status", "hit", "closed_utc", "bars", "result_r", "best_r"]
 OPEN = "open"
 
@@ -51,8 +51,9 @@ def append_signal(df: pd.DataFrame, sig, now: datetime | None = None) -> tuple[p
 
     row = {
         "id": sig_id, "opened_utc": now.isoformat(timespec="seconds"), "dir": sig.bias,
-        "entry": sig.entry, "stop": sig.stop, "tp1": sig.tps[0], "tp2": sig.tps[1],
-        "tp3": sig.tps[2], "risk": sig.risk, "conviction": sig.conviction,
+        "entry": sig.entry, "stop": sig.stop,
+        "tps": "|".join(str(t) for t in sig.tps),
+        "risk": sig.risk, "conviction": sig.conviction,
         "posture": sig.posture, "status": OPEN, "hit": "", "closed_utc": "",
         "bars": 0, "result_r": "", "best_r": 0.0,
     }
@@ -77,7 +78,9 @@ def resolve(df: pd.DataFrame, candles: pd.DataFrame, cost_r: float = 0.05) -> tu
 
         long = row["dir"] == "LONG"
         entry, stop, risk = float(row["entry"]), float(row["stop"]), float(row["risk"])
-        tps = [float(row["tp1"]), float(row["tp2"]), float(row["tp3"])]
+        tps = [float(x) for x in str(row["tps"]).split("|") if x not in ("", "nan")]
+        if not tps:
+            continue
         hit = [int(h) for h in str(row.get("hit") or "").split("|") if h.strip().isdigit()]
         best = float(row.get("best_r") or 0.0)
         status, closed_at = OPEN, None
@@ -93,8 +96,8 @@ def resolve(df: pd.DataFrame, candles: pd.DataFrame, cost_r: float = 0.05) -> tu
             if stopped:                      # conservative: stop wins a tied bar
                 status, closed_at = "stop", bar["datetime"]
                 break
-            if 3 in hit:
-                status, closed_at = "tp3", bar["datetime"]
+            if len(tps) in hit:                 # final target reached
+                status, closed_at = f"tp{len(tps)}", bar["datetime"]
                 break
 
         df.at[i, "hit"] = "|".join(str(h) for h in sorted(hit))
@@ -110,14 +113,13 @@ def resolve(df: pd.DataFrame, candles: pd.DataFrame, cost_r: float = 0.05) -> tu
 
 
 def _scaled_r(hit: list, tps: list, entry: float, risk: float, cost_r: float) -> float:
-    """50% banked at TP1 (rest to breakeven), 30% at TP2, 20% at TP3."""
+    """Scale out across however many targets the ladder has. Anything not banked by a
+    target is assumed to come off at breakeven, since the stop moves up after TP1."""
     if not hit:
         return -1.0 - cost_r
-    r = 0.5 * (abs(tps[0] - entry) / risk)
-    if 2 in hit:
-        r += 0.3 * (abs(tps[1] - entry) / risk)
-    if 3 in hit:
-        r += 0.2 * (abs(tps[2] - entry) / risk)
+    from .engine import tp_weights
+    w = tp_weights(len(tps))
+    r = sum(w[n - 1] * (abs(tps[n - 1] - entry) / risk) for n in hit if n <= len(tps))
     return r - cost_r
 
 

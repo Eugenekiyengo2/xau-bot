@@ -12,14 +12,12 @@ def format_signal(sig: Signal, macro: MacroRead) -> str:
         f"Conviction: {sig.conviction}/100",
     ]
     if sig.bias in ("LONG", "SHORT") and sig.entry is not None:
-        lines += [
-            "",
-            f"Entry : {sig.entry}",
-            f"Stop  : {sig.stop}   (risk {sig.risk})",
-            f"TP1   : {sig.tps[0]}  (1R)",
-            f"TP2   : {sig.tps[1]}",
-            f"TP3   : {sig.tps[2]}  (3R)",
-        ]
+        lines += ["", f"Entry : {sig.entry}", f"Stop  : {sig.stop}   (risk {sig.risk})"]
+        from .engine import tp_weights
+        w = tp_weights(len(sig.tps))
+        for i, tp in enumerate(sig.tps):
+            rr = abs(tp - sig.entry) / sig.risk if sig.risk else 0
+            lines.append(f"TP{i+1}   : {tp}  ({rr:.1f}R, take {w[i]*100:.0f}%)")
     label = {"bull": "BULL", "bear": "BEAR", "neu": "—"}
     tb = "  ".join(f"{k}:{label.get(v, v)}" for k, v in sig.tf_bias.items())
     if tb:

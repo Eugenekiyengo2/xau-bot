@@ -186,27 +186,52 @@ def _primary_trend(reads: dict):
     return None
 
 
+def tp_weights(n: int) -> list:
+    """How much of the position comes off at each target.
+
+    Three targets keep the long-standing 50/30/20. Any other count banks half at the
+    first target — that is what takes the trade to breakeven and does most of the work —
+    and splits the remainder evenly across the rest.
+    """
+    if n <= 1:
+        return [1.0]
+    if n == 3:
+        return [0.5, 0.3, 0.2]
+    return [0.5] + [0.5 / (n - 1)] * (n - 1)
+
+
 def _targets(entry: float, risk: float, struct, d: int, cfg) -> list:
-    """A ladder that is always ordered TP1 < TP2 < TP3 in the trade's direction.
+    """A ladder of cfg.TP_COUNT targets, always ordered in the trade's direction.
 
     TP1 banks 1R. TP2 aims at the opposing structure, where price is most likely to
-    react, clamped so it sits neither on top of TP1 nor out of reach. TP3 always sits
-    beyond TP2 — a numbered target that is nearer than the one before it is a bug.
+    react, clamped so it sits neither on top of TP1 nor out of reach. TP3 sits beyond
+    TP2 (or at 3R, whichever is further), and any targets after that step out one R at
+    a time. A numbered target nearer than the one before it is a bug, so the ladder is
+    built strictly increasing by construction.
     """
+    n = max(1, int(getattr(cfg, "TP_COUNT", 3)))
     tp1 = entry + d * risk
+    if n == 1:
+        return [tp1]
+
     near = entry + d * cfg.TP2_MIN_R * risk          # TP2 must clear this
     cap = entry + d * cfg.MAX_TP_R * risk            # ...and not exceed this
-
     if struct is None or d * (struct - near) <= 0:
         tp2 = entry + d * 2.0 * risk                 # no usable structure: plain 2R
     else:
         tp2 = struct if d * (cap - struct) >= 0 else cap
+    if n == 2:
+        return [tp1, tp2]
 
     tp3 = tp2 + d * risk                             # always one more R beyond TP2
     stretch = entry + d * 3.0 * risk
     if d * (stretch - tp3) > 0:                      # ...or 3R, whichever is further
         tp3 = stretch
-    return [tp1, tp2, tp3]
+
+    out = [tp1, tp2, tp3]
+    for i in range(1, n - 2):                        # TP4 onwards: one R apart
+        out.append(tp3 + d * i * risk)
+    return out
 
 
 def _last(a):
