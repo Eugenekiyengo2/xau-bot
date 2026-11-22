@@ -33,7 +33,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           USE_COT: "true"
           USE_CALENDAR: "true"
-          ALERT_ON: actionable
+          ALERT_ON: always
           TP_COUNT: "6"
           SWEEP_LOOKBACK: "30"
           KILLZONES: "7-11,12-16"
