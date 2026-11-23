@@ -7,7 +7,9 @@ transport/rate-limit errors — never on a parsing bug, which would burn credits
 Spot gold often has NO volume field; that is normal and handled.
 """
 from __future__ import annotations
+import os
 import time
+
 import requests
 import pandas as pd
 
@@ -19,6 +21,46 @@ OUTPUTSIZE = {"1W": 300, "1D": 400, "4H": 400, "30m": 400, "15m": 400, "3m": 400
 # seconds to wait between successive API calls, to stay under the per-minute credit cap
 PACE_SECONDS = 9
 _last_call_at = 0.0
+
+# How long a timeframe's candles stay usable before they are worth re-downloading.
+# A weekly bar does not change between two checks five minutes apart, so refetching
+# it every run is pure waste; the 3-minute chart genuinely does move. Caching by
+# timeframe is what makes frequent checking affordable on a free data plan.
+CACHE_DIR = os.getenv("TF_CACHE_DIR", "tfcache")
+CACHE_TTL_MIN = {"1W": 1440, "1D": 60, "4H": 60, "30m": 25, "15m": 12, "3m": 4}
+
+
+def _cache_file(symbol: str, tf: str) -> str:
+    tag = symbol.replace("/", "").replace(" ", "").upper()
+    return os.path.join(CACHE_DIR, f"{tag}_{tf}.csv")
+
+
+def _from_cache(symbol: str, tf: str):
+    """Return cached candles while they are still inside this timeframe's TTL."""
+    path = _cache_file(symbol, tf)
+    ttl = CACHE_TTL_MIN.get(tf, 10) * 60
+    try:
+        if not os.path.exists(path):
+            return None
+        age = time.time() - os.path.getmtime(path)
+        if age > ttl:
+            return None
+        df = pd.read_csv(path, parse_dates=["datetime"])
+        if df.empty:
+            return None
+        print(f"[data] {tf:>3}: {len(df)} bars (cached, {age/60:.0f}m old)")
+        return df
+    except Exception as e:  # noqa - a bad cache must never break a run
+        print(f"[data] {tf} cache unreadable: {e}")
+        return None
+
+
+def _to_cache(symbol: str, tf: str, df: pd.DataFrame):
+    try:
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        df.to_csv(_cache_file(symbol, tf), index=False)
+    except Exception as e:  # noqa
+        print(f"[data] {tf} cache not written: {e}")
 
 
 class RateLimited(Exception):
@@ -35,7 +77,16 @@ def _pace():
 
 
 def fetch_ohlcv(tf: str, cfg) -> pd.DataFrame | None:
-    """Fetch candles for one timeframe. Returns a DataFrame or None (never raises)."""
+    """Fetch candles for one timeframe. Returns a DataFrame or None (never raises).
+
+    Serves from cache while the timeframe's data is still current, which is what
+    keeps a five-minute check cadence inside a free plan's daily call budget.
+    """
+    if getattr(cfg, "USE_TF_CACHE", True):
+        cached = _from_cache(cfg.SYMBOL, tf)
+        if cached is not None:
+            return cached
+
     params = {
         "symbol": cfg.SYMBOL,                 # "XAU/USD"
         "interval": TD_INTERVAL[tf],
@@ -70,10 +121,13 @@ def fetch_ohlcv(tf: str, cfg) -> pd.DataFrame | None:
         return None
 
     try:
-        return _to_frame(rows, tf)
+        df = _to_frame(rows, tf)
     except Exception as e:  # noqa
         print(f"[data] {tf} could not be parsed: {e}")
         return None
+    if getattr(cfg, "USE_TF_CACHE", True):
+        _to_cache(cfg.SYMBOL, tf, df)
+    return df
 
 
 def _request(params: dict) -> list:
