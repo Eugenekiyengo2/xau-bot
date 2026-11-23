@@ -22,7 +22,9 @@ jobs:
           python-version: "3.12"
       - uses: actions/cache@v4
         with:
-          path: last_state.json
+          path: |
+            last_state.json
+            status_last.json
           key: xau-state-${{ github.run_id }}
           restore-keys: xau-state-
       # Candle cache. Each run is a fresh machine, so without this every check
@@ -44,6 +46,7 @@ jobs:
           USE_COT: "true"
           USE_CALENDAR: "true"
           ALERT_ON: actionable
+          STATUS_EVERY_MIN: "60"
           TP_COUNT: "6"
           SWEEP_LOOKBACK: "30"
           KILLZONES: "7-11,12-16"
