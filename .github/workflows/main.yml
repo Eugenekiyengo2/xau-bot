@@ -1,13 +1,12 @@
 name: XAU confluence bot
 
 on:
-  schedule:
-    # 07:00-16:59 UTC on weekdays, covering the London and New York sessions.
-    # Deliberately on :07 and :37 rather than :00 and :30 - GitHub warns that
-    # scheduled runs are delayed at the top of the hour, and on free runners the
-    # congested minutes are frequently skipped altogether. Odd minutes get served.
-    - cron: "7,37 7-16 * * 1-5"
+  # GitHub's own scheduler never fired a single run here, across three different
+  # cron expressions and after clearing the billing block, so scheduling is done
+  # externally instead and this workflow only responds to being triggered.
   workflow_dispatch: {}
+  repository_dispatch:
+    types: [run-bot]
 
 # needed so the run can commit journal.csv back to the repository
 permissions:
