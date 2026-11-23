@@ -2,7 +2,10 @@ name: XAU confluence bot
 
 on:
   schedule:
-    - cron: "*/20 7-10,12-15 * * 1-5"
+    # Every 30 minutes, 07:00-16:59 UTC, weekdays - covering the London and New York
+    # sessions. A single hour range rather than a comma-separated list, because the
+    # comma form was not being registered by GitHub's scheduler.
+    - cron: "*/30 7-16 * * 1-5"
   workflow_dispatch: {}
 
 # needed so the run can commit journal.csv back to the repository
