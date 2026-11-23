@@ -25,6 +25,13 @@ jobs:
           path: last_state.json
           key: xau-state-${{ github.run_id }}
           restore-keys: xau-state-
+      # Candle cache. Each run is a fresh machine, so without this every check
+      # would re-download the weekly and daily charts that have not changed.
+      - uses: actions/cache@v4
+        with:
+          path: tfcache
+          key: xau-tfcache-${{ github.run_id }}
+          restore-keys: xau-tfcache-
       - run: pip install -r requirements.txt
       - run: python run_once.py
         env:
