@@ -16,6 +16,8 @@ class Config:
     # Markets to scan. Each one costs ~6 API calls per run, so on a free
     # plan (800/day) keep the list short or slow the schedule down.
     SYMBOLS = os.getenv("SYMBOLS", "XAU/USD")
+    # Reuse recently downloaded candles instead of refetching every run.
+    USE_TF_CACHE = _b("USE_TF_CACHE", True)
     CHARTS_DIR = os.getenv("CHARTS_DIR", "charts")
 
     # --- indicator spec (Confluence Desk defaults) ---
