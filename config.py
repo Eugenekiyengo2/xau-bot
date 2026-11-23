@@ -77,6 +77,9 @@ class Config:
 
     # --- behaviour ---
     ALERT_ON = os.getenv("ALERT_ON", "actionable")    # "actionable" | "always"
+    # A periodic note proving the bot is alive and saying what is blocking trades.
+    # 0 turns it off. 120 means at most one digest every two hours.
+    STATUS_EVERY_MIN = int(os.getenv("STATUS_EVERY_MIN", 120))
     STATE_FILE = os.getenv("STATE_FILE", "last_state.json")
     JOURNAL_FILE = os.getenv("JOURNAL_FILE", "journal.csv")
     USE_JOURNAL = _b("USE_JOURNAL", True)

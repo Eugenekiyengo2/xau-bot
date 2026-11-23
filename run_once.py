@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 
 from config import cfg
 from bot.models import MacroRead
@@ -127,8 +128,19 @@ def update_journal(sig, frames, symbol: str):
         print(f"[journal] skipped: {e}")
 
 
-def analyse(symbol: str, macro) -> bool:
-    """One market, end to end. Returns True if any reading was obtained."""
+def why_not(sig) -> str:
+    """The one sentence that explains why this market is not trading right now."""
+    markers = ("Blocked:", "Outside the", "Rejected:", "below the", "No entry trigger",
+               "waiting for confirmation", "Rotation", "Red-news")
+    for r in sig.reasons[1:]:
+        if any(m in r for m in markers):
+            text = r.split(" — ")[0].split(". ")[0]
+            return text[:90]
+    return "no trigger"
+
+
+def analyse(symbol: str, macro) -> dict | None:
+    """One market, end to end. Returns a short result for the status digest."""
     cfg.SYMBOL = symbol                       # the data layer reads this
     print("\n" + "=" * 52)
     print(f"  {symbol}")
@@ -137,7 +149,7 @@ def analyse(symbol: str, macro) -> bool:
     reads, frames = gather_reads()
     if not reads:
         print(f"No readings for {symbol} — skipped.")
-        return False
+        return None
 
     # These two are market-specific, so they are computed per symbol rather than once.
     try:
@@ -160,7 +172,47 @@ def analyse(symbol: str, macro) -> bool:
         print("[alert] sent")
     else:
         print("[alert] no change / not actionable — nothing sent")
-    return True
+    return {"symbol": symbol, "bias": sig.bias, "posture": sig.posture,
+            "conviction": sig.conviction, "why": why_not(sig),
+            "score": sig.reasons[0] if sig.reasons else ""}
+
+
+def status_digest(results: list) -> str:
+    """A short note proving the bot is alive and saying what is holding it back."""
+    from datetime import datetime, timezone
+    lines = [f"📊 XAU bot — status {datetime.now(timezone.utc):%H:%M} UTC",
+             f"Checked {len(results)} markets, no trade taken.", ""]
+    for r in results:
+        tag = {"ACCUMULATION": "↑", "DISTRIBUTION": "↓"}.get(r["posture"], "·")
+        lines.append(f"{tag} {r['symbol']:<9} conv {r['conviction']:>3}  {r['why']}")
+    lines += ["", "Silence means the filters are holding, not that the bot is down."]
+    return "\n".join(lines)
+
+
+def maybe_send_status(results: list):
+    """Send the digest at most every STATUS_EVERY_MIN minutes, so it informs
+    rather than floods: 240 evaluations a day would be 240 notifications."""
+    every = int(getattr(cfg, "STATUS_EVERY_MIN", 0) or 0)
+    if every <= 0 or not results:
+        return
+    path = "status_last.json"
+    now = time.time()
+    try:
+        last = json.load(open(path)).get("at", 0) if os.path.exists(path) else 0
+    except Exception:  # noqa
+        last = 0
+    if now - last < every * 60:
+        mins = (every * 60 - (now - last)) / 60
+        print(f"[status] next digest in {mins:.0f} min")
+        return
+    text = status_digest(results)
+    print(text)
+    if alerts.send_telegram(text, cfg):
+        print("[status] digest sent")
+    try:
+        json.dump({"at": now}, open(path, "w"))
+    except Exception:  # noqa
+        pass
 
 
 def main():
@@ -172,17 +224,22 @@ def main():
     print(f"Markets: {', '.join(symbols)}   (~{per_run} API calls this run)")
 
     macro = gather_macro()                    # COT and the calendar are gold-specific
-    ok = 0
+    results = []
     for sym in symbols:
         try:
-            if analyse(sym, macro):
-                ok += 1
+            r = analyse(sym, macro)
+            if r:
+                results.append(r)
         except Exception as e:  # noqa - one bad market must not stop the rest
             print(f"[{sym}] failed: {e}")
-    if ok == 0:
+    if not results:
         print("\nNo market produced a reading — check SOURCE / API key / symbols.")
         sys.exit(1)
-    print(f"\nDone: {ok}/{len(symbols)} markets analysed.")
+
+    # Only digest when nothing actually fired; a real signal speaks for itself.
+    if not any(r["bias"] in ("LONG", "SHORT") for r in results):
+        maybe_send_status(results)
+    print(f"\nDone: {len(results)}/{len(symbols)} markets analysed.")
 
 
 if __name__ == "__main__":
