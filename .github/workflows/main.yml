@@ -49,7 +49,7 @@ jobs:
           STATUS_EVERY_MIN: "60"
           TP_COUNT: "6"
           SWEEP_LOOKBACK: "30"
-          KILLZONES: "7-11,12-16"
+          KILLZONES: "7-17"
           PRECISION_ENTRY: "true"
           REQUIRE_MSS: "true"
           LEVERAGE: "500"
