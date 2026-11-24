@@ -139,6 +139,44 @@ def why_not(sig) -> str:
     return "no trigger"
 
 
+def localise_macro(macro, symbol: str):
+    """Make the shared macro reading mean the right thing for THIS market.
+
+    gather_macro() runs once per cycle, so one object was being handed to every
+    symbol. Two of its fields are not market-neutral:
+
+      cot_stance   is parsed from CFTC contract 088691, which is gold. Added to a
+                   currency pair it contributes two points of pure noise: what gold
+                   commercials are doing says nothing about sterling.
+
+      usd_stance   is derived from EUR/USD and returns "bull" when the DOLLAR IS
+                   WEAK, because a weak dollar lifts gold. That reads correctly for
+                   XAU/USD, EUR/USD and GBP/USD, where USD is the quote currency.
+                   USD/JPY is the opposite: the dollar is the base, so a weak dollar
+                   sends the pair DOWN, and the unmodified value argued for a long
+                   exactly when it should have argued for a short.
+
+    Returns a copy, so one market can never alter what the next market sees.
+    """
+    import copy
+    m = copy.copy(macro)
+    base, _, quote = symbol.partition("/")
+
+    if "XAU" not in symbol.upper():
+        if m.cot_stance != "neu":
+            print(f"[macro] {symbol}: gold COT not applicable — factor dropped")
+        m.cot_stance = "neu"
+
+    if base.upper() == "USD":
+        flip = {"bull": "bear", "bear": "bull"}
+        if m.usd_stance in flip:
+            m.usd_stance = flip[m.usd_stance]
+            m.usd_note = (f"{m.usd_note} — inverted for {symbol}, where the dollar "
+                          f"is the base currency").strip(" —")
+            print(f"[macro] {symbol}: dollar factor inverted (USD is the base)")
+    return m
+
+
 def analyse(symbol: str, macro) -> dict | None:
     """One market, end to end. Returns a short result for the status digest."""
     cfg.SYMBOL = symbol                       # the data layer reads this
@@ -150,6 +188,8 @@ def analyse(symbol: str, macro) -> dict | None:
     if not reads:
         print(f"No readings for {symbol} — skipped.")
         return None
+
+    macro = localise_macro(macro, symbol)     # gold COT / dollar sign per market
 
     # These two are market-specific, so they are computed per symbol rather than once.
     try:
